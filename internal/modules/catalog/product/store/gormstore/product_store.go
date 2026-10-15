@@ -291,10 +291,10 @@ func (r *ProductStore) Delete(id string) error {
 	return r.db.Model(&productdomain.Product{}).Where("id = ? AND deleted_at IS NULL", id).Update("deleted_at", time.Now()).Error
 }
 
-// CountBySlug 统计 slug 数量（含软删除记录：products.slug 唯一索引同样约束已删除商品）
+// CountBySlug 统计占用该 slug 的未删除商品数量（唯一索引为部分索引，不约束软删除记录）
 func (r *ProductStore) CountBySlug(slug string, excludeID *string) (int64, error) {
 	var count int64
-	query := r.db.Model(&productdomain.Product{}).Where("slug = ?", slug)
+	query := r.db.Model(&productdomain.Product{}).Where("slug = ? AND deleted_at IS NULL", slug)
 	if excludeID != nil {
 		query = query.Where("id != ?", *excludeID)
 	}

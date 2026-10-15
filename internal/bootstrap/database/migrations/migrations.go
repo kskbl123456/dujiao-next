@@ -39,6 +39,8 @@ const (
 	procurementOrderForeignKeyConstraint            = "fk_procurement_orders_local_order"
 	supersededProcurementOrderForeignKeyConstraint  = "fk_procurement_orders_local_order_reference"
 	userOAuthIdentityUserProviderUniqueIndex        = "idx_user_oauth_identity_user_provider"
+	productSlugPartialIndexMigrationKey             = "migration/product_slug_partial_index_v1"
+	productSlugUniqueIndex                          = "idx_products_slug"
 )
 
 type userOAuthIdentityUserProviderIndexSchema struct {
@@ -446,6 +448,47 @@ func migrateCartSKUUniqueIndex() error {
 		}
 	}
 	return nil
+}
+
+// ensureProductSlugPartialIndexMigration 把 products.slug 的唯一索引替换为部分唯一索引（仅约束未删除记录）。
+// 历史索引不排除软删除行，导致已删除商品永久占用其 slug，应用层查重同样会被拦下；
+// 而系统并没有商品恢复功能，这份占用没有意义。
+func ensureProductSlugPartialIndexMigration() error {
+	if gormdb.DB == nil {
+		return errors.New("database is not initialized")
+	}
+
+	var marker settingsstore.SettingRecord
+	if err := gormdb.DB.First(&marker, "key = ?", productSlugPartialIndexMigrationKey).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else if migrationDone(marker.ValueJSON) {
+		return nil
+	}
+
+	return gormdb.DB.Transaction(func(tx *gorm.DB) error {
+		migrator := tx.Migrator()
+
+		// 必须先删除旧索引：同名索引已存在时 GORM 会直接跳过，部分索引无法生效。
+		if migrator.HasIndex(&productdomain.Product{}, productSlugUniqueIndex) {
+			if err := migrator.DropIndex(&productdomain.Product{}, productSlugUniqueIndex); err != nil {
+				return err
+			}
+		}
+		if err := migrator.CreateIndex(&productdomain.Product{}, productSlugUniqueIndex); err != nil {
+			return err
+		}
+
+		marker := settingsstore.SettingRecord{
+			Key: productSlugPartialIndexMigrationKey,
+			ValueJSON: jsonmap.JSON{
+				"done":        true,
+				"migrated_at": time.Now().UTC().Format(time.RFC3339),
+			},
+		}
+		return tx.Save(&marker).Error
+	})
 }
 
 // ensureUserOAuthIdentityUserProviderUniqueIndex makes one provider binding per

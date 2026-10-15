@@ -112,6 +112,9 @@ func AutoMigrate() error {
 	if err := migrateCartSKUUniqueIndex(); err != nil {
 		return err
 	}
+	if err := ensureProductSlugPartialIndexMigration(); err != nil {
+		return err
+	}
 	if err := ensureProductSKUMigration(); err != nil {
 		return err
 	}
